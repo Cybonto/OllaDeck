@@ -1,0 +1,4 @@
+.env
+volumes/*
+!volumes/.ignore
+.DS_Store

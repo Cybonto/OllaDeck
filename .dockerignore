@@ -1,0 +1,10 @@
+*
+!*.py
+!*.ipynb
+!requirements.txt
+!red_team_requirements.txt
+!blue_team_requirements.txt
+!images/*
+!front-end/*
+front-end/node_modules/*
+!volumes/*

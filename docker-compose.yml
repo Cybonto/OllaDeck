@@ -1,0 +1,273 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    # remove "deploy" if you only use CPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - net
+  database_neo4j:
+    user: neo4j:neo4j
+    image: neo4j:5.23
+    ports:
+      - 7687:7687
+      - 7474:7474
+    volumes:
+      - ./volumes/neo4j_data:/data
+    environment:
+      - NEO4J_AUTH=${NEO4J_USERNAME-neo4j}/${NEO4J_PASSWORD-password}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_db_tx__log_rotation_retention__policy=false
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    healthcheck:
+        test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider localhost:7474 || exit 1"]
+        interval: 15s
+        timeout: 30s
+        retries: 10
+    networks:
+      - net
+
+  app_loader:
+    build:
+      context: .
+      dockerfile: loader.Dockerfile
+    volumes:
+      - ./volumes/embedding_model:/embedding_model
+    environment:
+      - NEO4J_URI=${NEO4J_URI-neo4j://database:7687}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD-password}
+      - NEO4J_USERNAME=${NEO4J_USERNAME-neo4j}
+      - OPENAI_API_KEY=${OPENAI_API_KEY-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY-}      
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL-http://host.docker.internal:11434}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL-sentence_transformer}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT-"https://api.smith.langchain.com"}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2-false}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    networks:
+      - net
+    depends_on:
+      database_neo4j:
+        condition: service_healthy
+    x-develop:
+      watch:
+        - action: rebuild
+          path: .
+          ignore:
+            - pdf_bot.py
+            - api.py
+            - front-end/
+    ports:
+      - 8081:8080
+      - 8502:8502
+
+  app_pdfbot:
+    build:
+      context: .
+      dockerfile: pdf_bot.Dockerfile
+    environment:
+      - NEO4J_URI=${NEO4J_URI-neo4j://database:7687}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD-password}
+      - NEO4J_USERNAME=${NEO4J_USERNAME-neo4j}
+      - OPENAI_API_KEY=${OPENAI_API_KEY-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL-http://host.docker.internal:11434}
+      - LLM=${LLM-llama2}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL-sentence_transformer}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT-"https://api.smith.langchain.com"}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2-false}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    networks:
+      - net
+    depends_on:
+      database_neo4j:
+        condition: service_healthy
+    x-develop:
+      watch:
+        - action: rebuild
+          path: .
+          ignore:
+            - loader.py
+            - api.py
+            - front-end/
+    ports:
+      - 8503:8503
+
+  api_llm:
+    build:
+      context: .
+      dockerfile: api.Dockerfile
+    volumes:
+      - ./volumes/embedding_model:/embedding_model
+    environment:
+      - NEO4J_URI=${NEO4J_URI-neo4j://database:7687}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD-password}
+      - NEO4J_USERNAME=${NEO4J_USERNAME-neo4j}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}  
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL-http://host.docker.internal:11434}
+      - LLM=${LLM-llama2}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL-sentence_transformer}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT-"https://api.smith.langchain.com"}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2-false}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+    networks:
+      - net
+    depends_on:
+      database_neo4j:
+        condition: service_healthy
+    x-develop:
+      watch:
+        - action: rebuild
+          path: .
+          ignore:
+            - loader.py
+            - pdf_bot.py
+            - front-end/
+    ports:
+      - 8504:8504
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 http://localhost:8504/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app_frontend:
+    build:
+      context: .
+      dockerfile: front-end.Dockerfile
+    x-develop:
+      watch:
+        - action: sync
+          path: ./front-end
+          target: /app
+          ignore:
+            - ./front-end/node_modules/
+        - action: rebuild
+          path: ./front-end/package.json
+    depends_on:
+      api_llm:
+        condition: service_healthy
+    networks:
+      - net
+    ports:
+      - 8505:8505
+  
+  langfuse-server:
+    image: langfuse/langfuse:2
+    depends_on:
+      database_langfuse:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/postgres
+      - NEXTAUTH_SECRET=Q&&reT_Ocod&-Haji&h=Fruzarina1 # you need to pick a new one
+      - SALT=73f07dd3446006f2d7ce8b826978d9ca18ed04c37e3d024a88175cb628154ac7 # must generate a new one via `openssl rand -hex 32`
+      - ENCRYPTION_KEY=299f3c32f026e351a6749aecad54af33b9e9e9ad5418d1f87b63b1af18be9a68 # must generate a new one via `openssl rand -hex 32`
+      - NEXTAUTH_URL=http://localhost:3000
+      - TELEMETRY_ENABLED=${TELEMETRY_ENABLED:-true}
+      - LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES=${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+    networks:
+      - net
+    ports:
+      - 3000:3000
+
+  database_langfuse:
+    image: postgres
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=not.my.lm$D$Usw.first.rodeo # you need to pick a new password
+      - POSTGRES_DB=postgres
+    networks:
+      - net
+    ports:
+      - 5432:5432
+    volumes:
+      - ./volumes/langfuse_data:/var/lib/postgresql/data
+
+  red_team:
+    image: quay.io/jupyter/datascience-notebook:latest
+    user: root
+    build:
+      context: .
+      dockerfile: red_team.Dockerfile
+    volumes:
+      - ./volumes/redteam_data:/home/redteam_nb/data
+    ports:
+      - 8888:8888
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      JUPYTER_TOKEN: "jupyterLab" # set to your own token
+      NB_USER: "redteam_nb"
+      NB_UID: 1000
+      NB_GID: 100
+      CHOWN_HOME: "yes"
+    networks:
+      - net
+
+  blue_team:
+    image: quay.io/jupyter/datascience-notebook:latest
+    user: root
+    build:
+      context: .
+      dockerfile: blue_team.Dockerfile
+    volumes:
+      - ./volumes/blueteam_data:/home/blueteam_nb/data
+    ports:
+      - 8899:8888
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      JUPYTER_TOKEN: "jupyterLab" # set to your own token
+      NB_USER: "blueteam_nb"
+      NB_UID: 1000
+      NB_GID: 100
+      CHOWN_HOME: "yes"
+    networks:
+      - net
+
+  # remove tritonserver if you only use CPU
+  tritonserver:
+    image: nvcr.io/nvidia/tritonserver:24.08-py3
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
+    networks:
+      - net
+    volumes:
+      - ./volumes/triton-model-repository:/models
+    command: tritonserver --model-repository=/models
+
+
+networks:
+  net:
