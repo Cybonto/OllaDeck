@@ -25,7 +25,7 @@ RUN apt install -y /tmp/compliance-masonry.deb && \
 
 WORKDIR /home/blueteam_nb
 
-COPY volumes/blueteam_data/blue_team_requirements.txt .
+COPY ./blue_team_requirements.txt .
 RUN pip install --upgrade -r ./blue_team_requirements.txt
 
 # Add a JupyterLab extension for version control if needed

@@ -1,0 +1,12 @@
+autogluon
+autoviz
+python-dateutil
+lxml
+pypdf2
+docx
+openpyxl
+tesseract
+textblob
+gensim
+cybox
+stix

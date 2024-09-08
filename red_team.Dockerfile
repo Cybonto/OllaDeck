@@ -11,7 +11,7 @@ FROM quay.io/jupyter/datascience-notebook:latest
 # Another option for base image: nvidia/cuda:12.6.0-cudnn-devel-ubuntu20.04
 
 WORKDIR /home/redteam_nb
-COPY volumes/redteam_data/red_team_requirements.txt .
+COPY ./red_team_requirements.txt .
 
 RUN pip install --upgrade -r ./red_team_requirements.txt
 
