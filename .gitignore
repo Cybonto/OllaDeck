@@ -1,3 +1,6 @@
 .env
+volumes/embedding_model/*
+volumes/neo4j_data/*
+volumes/langfuse_data/*
 !volumes/.ignore
 .DS_Store
